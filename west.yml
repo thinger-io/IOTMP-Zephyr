@@ -14,6 +14,7 @@ manifest:
           - cmsis
           - cmsis_6
           - mbedtls
+          - hal_stm32
 
     - name: iotmp-embedded
       remote: thinger-io
