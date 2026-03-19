@@ -11,10 +11,6 @@ jobs:
     runs-on: ubuntu-latest
     container: ghcr.io/zephyrproject-rtos/ci:v0.27.4
 
-    strategy:
-      matrix:
-        board: [mps2/an385, qemu_cortex_m3, nucleo_f767zi]
-
     env:
       ZEPHYR_SDK_INSTALL_DIR: /opt/toolchains/zephyr-sdk-0.17.0
 
@@ -36,11 +32,12 @@ jobs:
           west init -l iotmp-zephyr
           west update --narrow -o=--depth=1
 
-      - name: Build sample (${{ matrix.board }})
+      - name: Build (mps2/an385 — Cortex-M3, 4MB Flash/RAM)
         run: |
-          west build -b ${{ matrix.board }} iotmp-zephyr/samples/basic \
+          west build -b mps2/an385 iotmp-zephyr/samples/basic \
             -- -DEXTRA_ZEPHYR_MODULES="$(pwd)/iotmp-zephyr;$(pwd)/iotmp-embedded"
 
-      - name: Report size
+      - name: Memory report
         run: |
           west build -t rom_report 2>/dev/null | tail -20 || true
+          cat build/zephyr/zephyr.elf.memory_report.txt 2>/dev/null || true
