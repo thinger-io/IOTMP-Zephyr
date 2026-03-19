@@ -30,7 +30,7 @@ int main(void) {
 
     // Configure connection
     thing.set_credentials(THINGER_USERNAME, THINGER_DEVICE_ID, THINGER_CREDENTIALS);
-    thing.set_host("iot.thinger.io", 25204);  // Plain TCP (use 25206 for TLS)
+    thing.set_host("iot.thinger.io");
 
     // State callback
     thing.set_state_callback([](thinger::iotmp::client_state state) {

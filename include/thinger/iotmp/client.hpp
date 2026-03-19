@@ -1,6 +1,6 @@
 // The MIT License (MIT)
 //
-// Copyright (c) 2017 THINK BIG LABS SL
+// Copyright (c) INTERNET OF THINGER SL
 // Author: alvarolb@gmail.com (Alvaro Luis Bustamante)
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -24,11 +24,11 @@
 #ifndef THINGER_IOTMP_CLIENT_HPP
 #define THINGER_IOTMP_CLIENT_HPP
 
-#include "core/iotmp_types.hpp"
-#include "core/iotmp_message.hpp"
-#include "core/iotmp_encoder.hpp"
-#include "core/iotmp_decoder.hpp"
-#include "core/iotmp_resource.hpp"
+#include <thinger/iotmp/core/iotmp_types.hpp>
+#include <thinger/iotmp/core/iotmp_message.hpp>
+#include <thinger/iotmp/core/iotmp_encoder.hpp>
+#include <thinger/iotmp/core/iotmp_decoder.hpp>
+#include <thinger/iotmp/core/iotmp_resource.hpp>
 
 #include <zephyr/kernel.h>
 #include <zephyr/net/socket.h>
