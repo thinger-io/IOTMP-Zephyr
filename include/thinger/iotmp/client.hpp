@@ -24,6 +24,22 @@
 #ifndef THINGER_IOTMP_CLIENT_HPP
 #define THINGER_IOTMP_CLIENT_HPP
 
+// Map IOTMP logging to Zephyr LOG_MODULE — must be defined before core headers
+#include <zephyr/logging/log.h>
+
+#ifndef THINGER_LOG_ERROR
+#define THINGER_LOG_ERROR(fmt, ...)   LOG_ERR(fmt, ##__VA_ARGS__)
+#endif
+#ifndef THINGER_LOG_WARNING
+#define THINGER_LOG_WARNING(fmt, ...) LOG_WRN(fmt, ##__VA_ARGS__)
+#endif
+#ifndef THINGER_LOG_INFO
+#define THINGER_LOG_INFO(fmt, ...)    LOG_INF(fmt, ##__VA_ARGS__)
+#endif
+#ifndef THINGER_LOG_DEBUG
+#define THINGER_LOG_DEBUG(fmt, ...)   LOG_DBG(fmt, ##__VA_ARGS__)
+#endif
+
 #include <thinger/iotmp/core/iotmp_types.hpp>
 #include <thinger/iotmp/core/iotmp_message.hpp>
 #include <thinger/iotmp/core/iotmp_encoder.hpp>
@@ -32,7 +48,6 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/net/socket.h>
-#include <zephyr/logging/log.h>
 
 #include <string>
 #include <map>
