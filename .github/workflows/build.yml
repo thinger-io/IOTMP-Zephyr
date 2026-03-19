@@ -8,13 +8,17 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     container: ghcr.io/zephyrproject-rtos/ci:v0.27.4
 
     strategy:
       fail-fast: false
       matrix:
-        board: [mps2/an385, nucleo_f767zi]
+        board:
+          - mps2/an385
+          - nucleo_f767zi
+          - esp32c3_devkitc
+          - nrf52840dk/nrf52840
 
     env:
       ZEPHYR_SDK_INSTALL_DIR: /opt/toolchains/zephyr-sdk-0.17.0
