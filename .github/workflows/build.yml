@@ -25,12 +25,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: iotmp-zephyr
 
       - name: Checkout IOTMP-Embedded
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: thinger-io/IOTMP-Embedded
           path: iotmp-embedded
