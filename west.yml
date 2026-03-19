@@ -1,0 +1,21 @@
+manifest:
+  remotes:
+    - name: zephyrproject-rtos
+      url-base: https://github.com/zephyrproject-rtos
+    - name: thinger-io
+      url-base: https://github.com/thinger-io
+
+  projects:
+    - name: zephyr
+      remote: zephyrproject-rtos
+      revision: v4.1.0
+      import:
+        name-allowlist:
+          - cmsis
+          - cmsis_6
+          - mbedtls
+
+    - name: iotmp-embedded
+      remote: thinger-io
+      revision: main
+      path: modules/lib/iotmp-embedded

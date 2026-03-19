@@ -1,0 +1,73 @@
+menuconfig THINGER_IOTMP
+	bool "Thinger.io IOTMP client library"
+	depends on NET_SOCKETS
+	depends on CPP
+	depends on STD_CPP17
+	select EVENTFD
+	help
+	  Enable the Thinger.io IOTMP client library for connecting
+	  devices to the Thinger.io IoT platform.
+
+if THINGER_IOTMP
+
+config THINGER_IOTMP_STACK_SIZE
+	int "Client thread stack size"
+	default 4096
+	help
+	  Stack size for the IOTMP client thread.
+
+config THINGER_IOTMP_PRIORITY
+	int "Client thread priority"
+	default 7
+	help
+	  Priority of the IOTMP client thread.
+
+config THINGER_IOTMP_KEEPALIVE_SECONDS
+	int "Keep-alive interval in seconds"
+	default 60
+	help
+	  Interval between keep-alive messages sent to the server.
+
+config THINGER_IOTMP_MAX_MESSAGE_SIZE
+	int "Maximum message size in bytes"
+	default 4096
+	help
+	  Maximum size of a single IOTMP message body.
+
+config THINGER_IOTMP_TX_QUEUE_DEPTH
+	int "TX message queue depth"
+	default 8
+	help
+	  Maximum number of outbound messages that can be queued.
+
+config THINGER_IOTMP_MAX_RESOURCES
+	int "Maximum number of resources"
+	default 16
+	help
+	  Maximum number of device resources that can be registered.
+
+config THINGER_IOTMP_TLS
+	bool "Enable TLS support"
+	default y
+	depends on NET_SOCKETS_SOCKOPT_TLS
+	depends on MBEDTLS
+	help
+	  Enable TLS support for secure IOTMP connections.
+
+config THINGER_IOTMP_RECONNECT_BASE_MS
+	int "Reconnection base delay (ms)"
+	default 1000
+	help
+	  Base delay before reconnection attempts (exponential backoff).
+
+config THINGER_IOTMP_RECONNECT_MAX_MS
+	int "Reconnection max delay (ms)"
+	default 60000
+	help
+	  Maximum delay between reconnection attempts.
+
+module = THINGER_IOTMP
+module-str = thinger_iotmp
+source "subsys/logging/Kconfig.template.log_config"
+
+endif # THINGER_IOTMP
