@@ -35,7 +35,7 @@ int main(void) {
     // State callback
     thing.set_state_callback([](thinger::iotmp::client_state state) {
         switch(state) {
-            case thinger::iotmp::client_state::CONNECTING:
+            case thinger::iotmp::client_state::SOCKET_CONNECTING:
                 LOG_INF("Connecting...");
                 break;
             case thinger::iotmp::client_state::AUTHENTICATED:
@@ -47,7 +47,7 @@ int main(void) {
             case thinger::iotmp::client_state::DISCONNECTED:
                 LOG_INF("Disconnected");
                 break;
-            case thinger::iotmp::client_state::CONNECTION_ERROR:
+            case thinger::iotmp::client_state::SOCKET_CONNECTION_ERROR:
                 LOG_ERR("Connection error");
                 break;
             default:

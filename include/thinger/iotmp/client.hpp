@@ -55,17 +55,6 @@
 
 namespace thinger::iotmp {
 
-    enum class client_state {
-        DISCONNECTED,
-        CONNECTING,
-        CONNECTED,
-        AUTHENTICATING,
-        AUTHENTICATED,
-        AUTH_FAILED,
-        CONNECTION_ERROR,
-        READY
-    };
-
     class client : public iotmp_client_base<client> {
     public:
         client();
@@ -82,10 +71,6 @@ namespace thinger::iotmp {
         // State
         bool is_connected() const { return connected_; }
         client_state get_state() const { return state_; }
-
-        // State callback
-        using state_callback_t = std::function<void(client_state)>;
-        void set_state_callback(state_callback_t cb) { state_callback_ = std::move(cb); }
 
         // Server API (blocking, thread-safe — call from any thread)
         bool set_property(const char* property_id, json_t data);
@@ -122,8 +107,8 @@ namespace thinger::iotmp {
         // Server API helper (sends RUN message and waits for response)
         bool server_request(iotmp_message& msg, json_t* response_payload = nullptr);
 
-        // State
-        void notify_state(client_state state);
+        // State management (also notifies via base class callback)
+        void set_state(client_state state);
 
         // Configuration (host_/port_/username_/device_id_/credential_ are in base)
         bool use_tls_ = true;
@@ -142,7 +127,6 @@ namespace thinger::iotmp {
         volatile bool running_ = false;
         volatile bool connected_ = false;
         client_state state_ = client_state::DISCONNECTED;
-        state_callback_t state_callback_;
 
         // TX queue (for cross-thread message sending)
         struct k_mutex tx_mutex_;
