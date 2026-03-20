@@ -40,18 +40,14 @@
 #define THINGER_LOG_DEBUG(fmt, ...)   LOG_DBG(fmt, ##__VA_ARGS__)
 #endif
 
-#include <thinger/iotmp/core/iotmp_types.hpp>
-#include <thinger/iotmp/core/iotmp_message.hpp>
-#include <thinger/iotmp/core/iotmp_encoder.hpp>
-#include <thinger/iotmp/core/iotmp_decoder.hpp>
-#include <thinger/iotmp/core/iotmp_resource.hpp>
+#include <thinger/iotmp/iotmp.hpp>
 
 #include <zephyr/kernel.h>
 #include <zephyr/net/socket.h>
 
 #include <string>
-#include <map>
 #include <queue>
+#include <functional>
 
 #ifdef CONFIG_THINGER_IOTMP_TLS
 #include <zephyr/net/tls_credentials.h>
@@ -70,27 +66,14 @@ namespace thinger::iotmp {
         READY
     };
 
-    struct stream_config {
-        iotmp_resource* resource = nullptr;
-        unsigned int interval_ms = 0;
-        int64_t last_streaming = 0;
-    };
-
-    class client {
+    class client : public iotmp_client_base<client> {
     public:
         client();
         ~client();
 
-        // Configuration
-        void set_credentials(const char* username, const char* device_id, const char* credentials);
-        void set_host(const char* host, uint16_t port = 0);
-
 #ifdef CONFIG_THINGER_IOTMP_TLS
         void set_tls_tag(sec_tag_t tag);
 #endif
-
-        // Resource registration
-        iotmp_resource& operator[](const char* name);
 
         // Lifecycle
         int start();
@@ -111,8 +94,16 @@ namespace thinger::iotmp {
         bool call_endpoint(const char* endpoint_name);
         bool call_endpoint(const char* endpoint_name, json_t data);
 
-        // Manually stream a resource's current value
-        bool stream(const char* resource_name);
+        // ----- CRTP transport implementation -------------------------
+
+        bool send_bytes_impl(const void* data, size_t len);
+        bool recv_bytes_impl(void* buf, size_t len);
+        bool is_connected_impl() const;
+        unsigned long get_millis() const;
+        void on_disconnect();
+
+        // Send message from any thread (queues + wakes poll)
+        bool enqueue_message(iotmp_message& msg);
 
     private:
         // Thread entry point
@@ -124,29 +115,9 @@ namespace thinger::iotmp {
         // Connection lifecycle
         int do_connect();
         void do_disconnect();
-        bool do_authenticate();
 
-        // I/O helpers
-        bool socket_read(void* buf, size_t len);
-        bool socket_write(const void* buf, size_t len);
-        bool read_varint(uint32_t& value);
-
-        // Message handling
-        bool read_message(iotmp_message& msg);
-        bool write_message(iotmp_message& msg);
-        void handle_message(iotmp_message& msg);
-        void handle_resource_request(iotmp_message& request);
-
-        // Send message from client thread (direct write)
-        void send_message(iotmp_message& msg);
-
-        // Send message from any thread (queues + wakes poll)
-        bool enqueue_message(iotmp_message& msg);
+        // Flush TX queue (called from client thread)
         void flush_tx_queue();
-
-        // Streaming helpers
-        bool stream_resource(iotmp_resource& resource, uint16_t stream_id);
-        void check_stream_intervals();
 
         // Server API helper (sends RUN message and waits for response)
         bool server_request(iotmp_message& msg, json_t* response_payload = nullptr);
@@ -154,15 +125,7 @@ namespace thinger::iotmp {
         // State
         void notify_state(client_state state);
 
-        // Resource matching
-        iotmp_resource* find_resource(const std::string& path);
-
-        // Configuration
-        std::string host_ = "iot.thinger.io";
-        uint16_t port_ = 25206;
-        std::string username_;
-        std::string device_id_;
-        std::string credentials_;
+        // Configuration (host_/port_/username_/device_id_/credential_ are in base)
         bool use_tls_ = true;
 
 #ifdef CONFIG_THINGER_IOTMP_TLS
@@ -184,10 +147,6 @@ namespace thinger::iotmp {
         // TX queue (for cross-thread message sending)
         struct k_mutex tx_mutex_;
         std::queue<std::string> tx_queue_;
-
-        // Resources and streams
-        std::map<std::string, iotmp_resource> resources_;
-        std::map<uint16_t, stream_config> streams_;
 
         // Read buffer
         uint8_t read_buffer_[CONFIG_THINGER_IOTMP_MAX_MESSAGE_SIZE];
