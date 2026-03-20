@@ -30,7 +30,6 @@
 
 #include <cerrno>
 #include <cstring>
-#include <algorithm>
 
 LOG_MODULE_REGISTER(thinger_iotmp, CONFIG_THINGER_IOTMP_LOG_LEVEL);
 
@@ -90,18 +89,112 @@ bool client::recv_bytes_impl(void* buf, size_t len) {
 }
 
 bool client::is_connected_impl() const {
-    return sock_ >= 0 && connected_;
+    return sock_ >= 0;
 }
 
 unsigned long client::get_millis() const {
     return static_cast<unsigned long>(k_uptime_get());
 }
 
-void client::on_disconnect() {
-    connected_ = false;
-    set_state(client_state::DISCONNECTED);
-    do_disconnect();
-    clear_streams();
+// ============================================================================
+// CRTP connection implementation
+// ============================================================================
+
+bool client::connect_impl() {
+    struct zsock_addrinfo hints = {};
+    struct zsock_addrinfo* res = nullptr;
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+
+    char port_str[8];
+    snprintf(port_str, sizeof(port_str), "%u", port_);
+
+    int rc = zsock_getaddrinfo(host_, port_str, &hints, &res);
+    if(rc != 0 || !res) {
+        LOG_ERR("DNS resolve failed for %s: %d", host_, rc);
+        return false;
+    }
+
+#ifdef CONFIG_THINGER_IOTMP_TLS
+    sock_ = zsock_socket(res->ai_family, res->ai_socktype, IPPROTO_TLS_1_2);
+#else
+    sock_ = zsock_socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+#endif
+
+    if(sock_ < 0) {
+        LOG_ERR("Socket creation failed: %d", errno);
+        zsock_freeaddrinfo(res);
+        return false;
+    }
+
+#ifdef CONFIG_THINGER_IOTMP_TLS
+    if(tls_tag_ >= 0) {
+        sec_tag_t sec_tags[] = { tls_tag_ };
+        rc = zsock_setsockopt(sock_, SOL_TLS, TLS_SEC_TAG_LIST, sec_tags, sizeof(sec_tags));
+        if(rc < 0) {
+            LOG_ERR("TLS sec tag failed: %d", errno);
+            zsock_close(sock_);
+            sock_ = -1;
+            zsock_freeaddrinfo(res);
+            return false;
+        }
+
+        rc = zsock_setsockopt(sock_, SOL_TLS, TLS_HOSTNAME, host_, strlen(host_) + 1);
+        if(rc < 0) {
+            LOG_WRN("TLS hostname failed: %d", errno);
+        }
+    }
+#endif
+
+    // Set receive timeout
+    struct zsock_timeval tv = { .tv_sec = 10, .tv_usec = 0 };
+    zsock_setsockopt(sock_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    rc = zsock_connect(sock_, res->ai_addr, res->ai_addrlen);
+    zsock_freeaddrinfo(res);
+
+    if(rc < 0) {
+        LOG_ERR("Connect failed: %d", errno);
+        zsock_close(sock_);
+        sock_ = -1;
+        return false;
+    }
+
+    return true;
+}
+
+void client::disconnect_impl() {
+    if(sock_ >= 0) {
+        zsock_close(sock_);
+        sock_ = -1;
+    }
+}
+
+bool client::data_available_impl() {
+    if(sock_ < 0) return false;
+
+    struct zsock_pollfd fds[2];
+    fds[0].fd = sock_;
+    fds[0].events = ZSOCK_POLLIN;
+    fds[1].fd = event_fd_;
+    fds[1].events = ZSOCK_POLLIN;
+
+    int nfds = (event_fd_ >= 0) ? 2 : 1;
+    int rc = zsock_poll(fds, nfds, 100); // 100ms blocking timeout
+
+    // Handle TX queue wakeup
+    if(nfds > 1 && (fds[1].revents & ZSOCK_POLLIN)) {
+        eventfd_t val;
+        eventfd_read(event_fd_, &val);
+        flush_tx_queue();
+    }
+
+    // Socket error/hangup
+    if(fds[0].revents & (ZSOCK_POLLHUP | ZSOCK_POLLERR)) {
+        return false;
+    }
+
+    return rc > 0 && (fds[0].revents & ZSOCK_POLLIN);
 }
 
 // ============================================================================
@@ -151,7 +244,7 @@ void client::stop() {
         thread_id_ = nullptr;
     }
 
-    do_disconnect();
+    disconnect();
 
     if(event_fd_ >= 0) {
         zsock_close(event_fd_);
@@ -162,7 +255,7 @@ void client::stop() {
 }
 
 // ============================================================================
-// Thread entry
+// Thread
 // ============================================================================
 
 void client::thread_entry(void* p1, void* p2, void* p3) {
@@ -173,192 +266,9 @@ void client::thread_entry(void* p1, void* p2, void* p3) {
 }
 
 void client::run() {
-    int backoff_ms = CONFIG_THINGER_IOTMP_RECONNECT_BASE_MS;
-
     while(running_) {
-        // Connect
-        set_state(client_state::SOCKET_CONNECTING);
-        int rc = do_connect();
-        if(rc < 0) {
-            LOG_ERR("Connection failed: %d", rc);
-            set_state(client_state::SOCKET_CONNECTION_ERROR);
-            goto reconnect;
-        }
-        set_state(client_state::SOCKET_CONNECTED);
-
-        // Authenticate (using base class)
-        set_state(client_state::AUTHENTICATING);
-        if(!this->authenticate()) {
-            LOG_ERR("Authentication failed");
-            set_state(client_state::AUTH_FAILED);
-            do_disconnect();
-            goto reconnect;
-        }
-
-        LOG_INF("Authenticated as %s@%s", get_device_id(), get_username());
-        connected_ = true;
-        set_state(client_state::AUTHENTICATED);
-        backoff_ms = CONFIG_THINGER_IOTMP_RECONNECT_BASE_MS;
-        set_state(client_state::READY);
-
-        // Event loop
-        {
-            struct zsock_pollfd fds[2];
-            fds[0].fd = sock_;
-            fds[0].events = ZSOCK_POLLIN;
-            fds[1].fd = event_fd_;
-            fds[1].events = ZSOCK_POLLIN;
-
-            int64_t last_activity = k_uptime_get();
-
-            while(running_ && connected_) {
-                int64_t elapsed = k_uptime_get() - last_activity;
-                int keepalive_ms = CONFIG_THINGER_IOTMP_KEEPALIVE_SECONDS * 1000;
-                int timeout_ms = std::max(0, static_cast<int>(keepalive_ms - elapsed));
-
-                // Also check stream intervals
-                int stream_timeout = 1000; // Check streams every second
-                timeout_ms = std::min(timeout_ms, stream_timeout);
-
-                rc = zsock_poll(fds, 2, timeout_ms);
-
-                if(rc < 0) {
-                    LOG_ERR("poll error: %d", errno);
-                    break;
-                }
-
-                // Incoming data on socket
-                if(fds[0].revents & ZSOCK_POLLIN) {
-                    iotmp_message msg(message::type::RESERVED);
-                    if(this->read_message(msg)) {
-                        this->handle_message(msg);
-                        last_activity = k_uptime_get();
-                    } else {
-                        LOG_WRN("Failed to read message, disconnecting");
-                        break;
-                    }
-                }
-
-                // Connection error
-                if(fds[0].revents & (ZSOCK_POLLHUP | ZSOCK_POLLERR)) {
-                    LOG_WRN("Socket error/hangup");
-                    break;
-                }
-
-                // Wakeup from eventfd (TX queue has data)
-                if(fds[1].revents & ZSOCK_POLLIN) {
-                    eventfd_t val;
-                    eventfd_read(event_fd_, &val);
-                    flush_tx_queue();
-                }
-
-                // Keepalive timeout
-                elapsed = k_uptime_get() - last_activity;
-                if(elapsed >= keepalive_ms) {
-                    this->send_keepalive();
-                    last_activity = k_uptime_get();
-                }
-
-                // Check stream intervals (using base class)
-                this->check_streams();
-            }
-        }
-
-        connected_ = false;
-        set_state(client_state::DISCONNECTED);
-        do_disconnect();
-        this->clear_streams();
-
-reconnect:
-        if(!running_) break;
-
-        LOG_INF("Reconnecting in %d ms...", backoff_ms);
-        k_msleep(backoff_ms);
-
-        // Exponential backoff with cap
-        backoff_ms = std::min(backoff_ms * 2, CONFIG_THINGER_IOTMP_RECONNECT_MAX_MS);
+        this->handle();
     }
-}
-
-// ============================================================================
-// Connection
-// ============================================================================
-
-int client::do_connect() {
-    LOG_INF("Connecting to %s:%d...", host_, port_);
-
-    struct zsock_addrinfo hints = {};
-    struct zsock_addrinfo* res = nullptr;
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-
-    char port_str[8];
-    snprintf(port_str, sizeof(port_str), "%u", port_);
-
-    int rc = zsock_getaddrinfo(host_, port_str, &hints, &res);
-    if(rc != 0 || !res) {
-        LOG_ERR("DNS resolve failed for %s: %d", host_, rc);
-        return -ENOENT;
-    }
-
-#ifdef CONFIG_THINGER_IOTMP_TLS
-    if(use_tls_) {
-        sock_ = zsock_socket(res->ai_family, res->ai_socktype, IPPROTO_TLS_1_2);
-    } else
-#endif
-    {
-        sock_ = zsock_socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-    }
-
-    if(sock_ < 0) {
-        LOG_ERR("Socket creation failed: %d", errno);
-        zsock_freeaddrinfo(res);
-        return -errno;
-    }
-
-#ifdef CONFIG_THINGER_IOTMP_TLS
-    if(use_tls_ && tls_tag_ >= 0) {
-        sec_tag_t sec_tags[] = { tls_tag_ };
-        rc = zsock_setsockopt(sock_, SOL_TLS, TLS_SEC_TAG_LIST, sec_tags, sizeof(sec_tags));
-        if(rc < 0) {
-            LOG_ERR("TLS sec tag failed: %d", errno);
-            zsock_close(sock_);
-            sock_ = -1;
-            zsock_freeaddrinfo(res);
-            return -errno;
-        }
-
-        rc = zsock_setsockopt(sock_, SOL_TLS, TLS_HOSTNAME, host_, strlen(host_) + 1);
-        if(rc < 0) {
-            LOG_WRN("TLS hostname failed: %d", errno);
-        }
-    }
-#endif
-
-    // Set receive timeout
-    struct zsock_timeval tv = { .tv_sec = 10, .tv_usec = 0 };
-    zsock_setsockopt(sock_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-
-    rc = zsock_connect(sock_, res->ai_addr, res->ai_addrlen);
-    zsock_freeaddrinfo(res);
-
-    if(rc < 0) {
-        LOG_ERR("Connect failed: %d", errno);
-        zsock_close(sock_);
-        sock_ = -1;
-        return -errno;
-    }
-
-    LOG_INF("Connected to %s:%d", host_, port_);
-    return 0;
-}
-
-void client::do_disconnect() {
-    if(sock_ >= 0) {
-        zsock_close(sock_);
-        sock_ = -1;
-    }
-    connected_ = false;
 }
 
 // ============================================================================
@@ -384,86 +294,6 @@ void client::flush_tx_queue() {
         tx_queue_.pop();
     }
     k_mutex_unlock(&tx_mutex_);
-}
-
-// ============================================================================
-// Server API
-// ============================================================================
-
-bool client::server_request(iotmp_message& msg, json_t* response_payload) {
-    if(!connected_) return false;
-
-    msg.set_random_stream_id();
-    uint16_t expected_stream_id = msg.get_stream_id();
-
-    if(!enqueue_message(msg)) return false;
-
-    // Wait for response (simple blocking approach)
-    // TODO: improve with a semaphore-based response matching mechanism
-    iotmp_message response(message::type::RESERVED);
-    int attempts = 0;
-    while(connected_ && attempts < 100) {
-        if(this->read_message(response)) {
-            if(response.get_stream_id() == expected_stream_id &&
-               response.get_message_type() <= message::type::ERROR) {
-                if(response_payload && response.has_payload()) {
-                    response_payload->swap(response.payload());
-                }
-                return response.get_message_type() == message::type::OK;
-            }
-            // Not our response — handle it normally
-            this->handle_message(response);
-        }
-        attempts++;
-    }
-    return false;
-}
-
-bool client::set_property(const char* property_id, json_t data) {
-    iotmp_message msg(message::type::RUN);
-    msg[message::field::RESOURCE] = static_cast<uint32_t>(server::run::SET_DEVICE_PROPERTY);
-    msg[message::field::PARAMETERS] = std::string(property_id);
-    msg[message::field::PAYLOAD].swap(data);
-    return server_request(msg);
-}
-
-bool client::get_property(const char* property_id, json_t& data) {
-    iotmp_message msg(message::type::RUN);
-    msg[message::field::RESOURCE] = static_cast<uint32_t>(server::run::READ_DEVICE_PROPERTY);
-    msg[message::field::PARAMETERS] = std::string(property_id);
-    return server_request(msg, &data);
-}
-
-bool client::write_bucket(const char* bucket_id, json_t data) {
-    iotmp_message msg(message::type::RUN);
-    msg[message::field::RESOURCE] = static_cast<uint32_t>(server::run::WRITE_BUCKET);
-    msg[message::field::PARAMETERS] = std::string(bucket_id);
-    msg[message::field::PAYLOAD].swap(data);
-    return server_request(msg);
-}
-
-bool client::call_endpoint(const char* endpoint_name) {
-    iotmp_message msg(message::type::RUN);
-    msg[message::field::RESOURCE] = static_cast<uint32_t>(server::run::CALL_ENDPOINT);
-    msg[message::field::PARAMETERS] = std::string(endpoint_name);
-    return server_request(msg);
-}
-
-bool client::call_endpoint(const char* endpoint_name, json_t data) {
-    iotmp_message msg(message::type::RUN);
-    msg[message::field::RESOURCE] = static_cast<uint32_t>(server::run::CALL_ENDPOINT);
-    msg[message::field::PARAMETERS] = std::string(endpoint_name);
-    msg[message::field::PAYLOAD].swap(data);
-    return server_request(msg);
-}
-
-// ============================================================================
-// Helpers
-// ============================================================================
-
-void client::set_state(client_state state) {
-    state_ = state;
-    notify_state(state);
 }
 
 } // namespace thinger::iotmp
