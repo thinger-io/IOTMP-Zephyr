@@ -24,24 +24,22 @@
 #ifndef THINGER_IOTMP_CLIENT_HPP
 #define THINGER_IOTMP_CLIENT_HPP
 
-// Map IOTMP logging to Zephyr LOG_MODULE — must be defined before core headers
-#include <zephyr/logging/log.h>
-
-// Declare the log module at global scope (outside any namespace)
-// LOG_MODULE_REGISTER is in iotmp_client.cpp
-LOG_MODULE_DECLARE(thinger_iotmp, CONFIG_THINGER_IOTMP_LOG_LEVEL);
+// Map IOTMP logging to Zephyr printk — works without LOG_MODULE_DECLARE,
+// safe to use in headers and templates (CRTP base class).
+// The iotmp_client.cpp uses LOG_MODULE_REGISTER for its own direct LOG_* calls.
+#include <zephyr/sys/printk.h>
 
 #ifndef THINGER_LOG_ERROR
-#define THINGER_LOG_ERROR(fmt, ...)   LOG_ERR(fmt, ##__VA_ARGS__)
+#define THINGER_LOG_ERROR(fmt, ...)   printk("[ERR][iotmp] " fmt "\n", ##__VA_ARGS__)
 #endif
 #ifndef THINGER_LOG_WARNING
-#define THINGER_LOG_WARNING(fmt, ...) LOG_WRN(fmt, ##__VA_ARGS__)
+#define THINGER_LOG_WARNING(fmt, ...) printk("[WRN][iotmp] " fmt "\n", ##__VA_ARGS__)
 #endif
 #ifndef THINGER_LOG_INFO
-#define THINGER_LOG_INFO(fmt, ...)    LOG_INF(fmt, ##__VA_ARGS__)
+#define THINGER_LOG_INFO(fmt, ...)    printk("[INF][iotmp] " fmt "\n", ##__VA_ARGS__)
 #endif
 #ifndef THINGER_LOG_DEBUG
-#define THINGER_LOG_DEBUG(fmt, ...)   LOG_DBG(fmt, ##__VA_ARGS__)
+#define THINGER_LOG_DEBUG(fmt, ...)   printk("[DBG][iotmp] " fmt "\n", ##__VA_ARGS__)
 #endif
 
 #include <thinger/iotmp/iotmp.hpp>
