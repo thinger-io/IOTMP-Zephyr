@@ -27,17 +27,19 @@
 // Map IOTMP logging to Zephyr LOG_MODULE — must be defined before core headers
 #include <zephyr/logging/log.h>
 
+// Use LOG_MODULE_DECLARE so LOG_* macros work in headers included from any .cpp
+// The actual LOG_MODULE_REGISTER is in iotmp_client.cpp
 #ifndef THINGER_LOG_ERROR
-#define THINGER_LOG_ERROR(fmt, ...)   LOG_ERR(fmt, ##__VA_ARGS__)
+#define THINGER_LOG_ERROR(fmt, ...)   do { LOG_MODULE_DECLARE(thinger_iotmp, CONFIG_THINGER_IOTMP_LOG_LEVEL); LOG_ERR(fmt, ##__VA_ARGS__); } while(0)
 #endif
 #ifndef THINGER_LOG_WARNING
-#define THINGER_LOG_WARNING(fmt, ...) LOG_WRN(fmt, ##__VA_ARGS__)
+#define THINGER_LOG_WARNING(fmt, ...) do { LOG_MODULE_DECLARE(thinger_iotmp, CONFIG_THINGER_IOTMP_LOG_LEVEL); LOG_WRN(fmt, ##__VA_ARGS__); } while(0)
 #endif
 #ifndef THINGER_LOG_INFO
-#define THINGER_LOG_INFO(fmt, ...)    LOG_INF(fmt, ##__VA_ARGS__)
+#define THINGER_LOG_INFO(fmt, ...)    do { LOG_MODULE_DECLARE(thinger_iotmp, CONFIG_THINGER_IOTMP_LOG_LEVEL); LOG_INF(fmt, ##__VA_ARGS__); } while(0)
 #endif
 #ifndef THINGER_LOG_DEBUG
-#define THINGER_LOG_DEBUG(fmt, ...)   LOG_DBG(fmt, ##__VA_ARGS__)
+#define THINGER_LOG_DEBUG(fmt, ...)   do { LOG_MODULE_DECLARE(thinger_iotmp, CONFIG_THINGER_IOTMP_LOG_LEVEL); LOG_DBG(fmt, ##__VA_ARGS__); } while(0)
 #endif
 
 #include <thinger/iotmp/iotmp.hpp>
