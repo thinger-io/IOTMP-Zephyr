@@ -540,6 +540,12 @@ void client::handle_resource_request(iotmp_message& request) {
             bool success = resource->run_resource(request, response);
             response.set_message_type(success ? message::type::OK : message::type::ERROR);
             send_message(response);
+
+            if(request.has_payload() && resource->stream_enabled() && resource->stream_echo() &&
+               (resource->get_io_type() == iotmp_resource::input_wrapper ||
+                resource->get_io_type() == iotmp_resource::input_output_wrapper)) {
+                stream_resource(*resource, resource->get_stream_id());
+            }
             break;
         }
 
